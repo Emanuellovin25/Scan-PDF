@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="DocScan">
+  <meta name="theme-color" content="#0f172a">
+  <title>DocScan – Document to PDF</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #6366f1;
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface2: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --whatsapp: #25d366;
+      --r: 16px;
+    }
+
+    html, body { height: 100%; height: -webkit-fill-available; background: var(--bg); }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+
+    /* ── Header ── */
+    .header {
+      flex-shrink: 0;
+      padding: 14px 20px;
+      padding-top: max(14px, env(safe-area-inset-top));
+      background: var(--surface);
+      border-bottom: 1px solid var(--surface2);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: var(--primary); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .logo h1 { font-size: 20px; font-weight: 700; letter-spacing: -.5px; }
+    .page-badge {
+      background: var(--primary); color: white;
+      font-size: 13px; font-weight: 700;
+      padding: 4px 12px; border-radius: 20px; display: none;
+    }
+
+    /* ── Scrollable body ── */
+    .body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: none;
+      display: flex;
+      flex-direction: column;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .body::-webkit-scrollbar { display: none; }
+    .body::-webkit-scrollbar-thumb { display: none; }
+    .body::-webkit-scrollbar-track { display: none; }
+
+    .content {
+      flex: 1;
+      padding: 20px;
+      padding-bottom: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Fixed bottom action bar ── */
+    .bottom-bar {
+      flex-shrink: 0;
+      padding: 12px 20px;
+      padding-bottom: max(44px, env(safe-area-inset-bottom));
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; gap: 14px; padding: 40px 20px;
+    }
+    .empty-icon {
+      width: 90px; height: 90px;
+      background: var(--surface); border-radius: 26px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 42px; border: 1px solid var(--surface2);
+    }
+    .empty-state h2 { font-size: 24px; font-weight: 700; letter-spacing: -.5px; }
+    .empty-state p { color: var(--muted); font-size: 15px; line-height: 1.6; max-width: 280px; }
+
+    /* ── Thumbnails ── */
+    .thumbnails { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
+    .thumb {
+      position: relative; border-radius: 12px;
+      overflow: hidden; background: var(--surface);
+      aspect-ratio: 3/4; border: 1px solid var(--surface2);
+    }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb-label {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 28px 10px 8px;
+      background: linear-gradient(to top, rgba(0,0,0,.75), transparent);
+      font-size: 12px; font-weight: 600; color: white;
+    }
+    .thumb-del {
+      position: absolute; top: 7px; right: 7px;
+      width: 30px; height: 30px;
+      background: rgba(15,23,42,.85); border: none; border-radius: 50%;
+      color: var(--red); font-size: 18px; font-weight: 700;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .proc-overlay {
+      position: absolute; inset: 0; background: rgba(15,23,42,.7);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    }
+    .spin {
+      width: 26px; height: 26px;
+      border: 3px solid rgba(255,255,255,.2); border-top-color: white;
+      border-radius: 50%; animation: spin .65s linear infinite;
+    }
+    .proc-overlay span { font-size: 12px; color: rgba(255,255,255,.85); font-weight: 600; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Buttons ── */
+    .btn {
+      width: 100%; padding: 17px 20px; border: none; border-radius: var(--r);
+      font-size: 16px; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      transition: opacity .15s, transform .1s; letter-spacing: -.2px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .4; pointer-events: none; }
+    .btn-primary   { background: var(--primary); color: white; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--surface2); }
+    .btn-green     { background: var(--green); color: white; }
+    .btn-whatsapp  { background: var(--whatsapp); color: white; }
+    .btn-danger    { background: transparent; color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+    .actions { display: flex; flex-direction: column; gap: 10px; }
+
+    /* ── PDF card ── */
+    .pdf-card {
+      background: var(--surface); border: 1px solid var(--surface2);
+      border-radius: var(--r); padding: 18px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .pdf-card-icon { font-size: 38px; flex-shrink: 0; }
+    .pdf-card-info h3 { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+    .pdf-card-info p { color: var(--muted); font-size: 13px; margin-top: 3px; }
+    .pdf-actions { display: none; flex-direction: column; gap: 10px; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: calc(24px + env(safe-area-inset-bottom));
+      left: 50%; transform: translateX(-50%) translateY(120%);
+      background: var(--surface2); color: var(--text);
+      padding: 12px 22px; border-radius: 30px;
+      font-size: 14px; font-weight: 600; white-space: nowrap;
+      z-index: 9999; border: 1px solid rgba(255,255,255,.08);
+      transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+
+
+    /* ════════════════════════════════════════
+       CROP MODAL
+    ════════════════════════════════════════ */
+    .crop-modal {
+      position: fixed; inset: 0; z-index: 500;
+      background: #000;
+      display: none;
+      flex-direction: column;
+    }
+
+    .crop-top {
+      flex-shrink: 0;
+      padding: 12px 16px;
+      padding-top: max(12px, env(safe-area-inset-top));
+      display: flex; align-items: center; justify-content: space-between;
+      background: #000;
+    }
+    .crop-top h2 { font-size: 17px; font-weight: 700; }
+    .crop-status {
+      font-size: 13px; color: var(--muted);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .crop-spin {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.2); border-top-color: var(--primary);
+      border-radius: 50%; animation: spin .65s linear infinite;
+      display: none;
+    }
+    .crop-spin.active { display: block; }
+
+    .crop-canvas-wrap {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; position: relative; background: #000;
+    }
+
+    #cropCanvas {
+      display: block;
+      max-width: 100%; max-height: 100%;
+      touch-action: none; /* critical for dragging on iOS */
+      cursor: crosshair;
+    }
+
+    .crop-hint {
+      position: absolute; bottom: 10px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,.65); color: rgba(255,255,255,.7);
+      font-size: 12px; padding: 5px 12px; border-radius: 20px;
+      pointer-events: none; white-space: nowrap;
+    }
+
+    .crop-footer {
+      flex-shrink: 0;
+      padding: 14px 16px;
+      padding-bottom: max(14px, env(safe-area-inset-bottom));
+      background: #000;
+      display: flex; gap: 10px;
+    }
+    .crop-footer .btn { flex: 1; padding: 15px; font-size: 15px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">📄</div>
+    <h1>DocScan</h1>
+  </div>
+  <div class="page-badge" id="pageBadge">0 pages</div>
+</div>
+
+<!-- ── Main scrollable body ── -->
+<div class="body">
+  <div class="content">
+
+    <div class="empty-state" id="emptyState">
+      <button class="btn btn-primary" id="scanBtn" onclick="triggerCamera()" style="font-size:18px; padding:18px 40px; border-radius:16px;">
+        📷 &nbsp;Scan Document
+      </button>
+    </div>
+
+    <div class="thumbnails" id="thumbnails" style="display:none"></div>
+
+  </div>
+</div>
+
+<!-- ── Fixed bottom action bar ── -->
+<div class="bottom-bar">
+  <div class="actions" id="actions">
+    <button class="btn btn-secondary" id="addBtn" onclick="triggerCamera()" style="display:none">
+      ➕ &nbsp;Add Another Page
+    </button>
+
+    <button class="btn btn-green" id="createBtn" onclick="createPDF()" style="display:none">
+      📑 &nbsp;Create PDF
+    </button>
+
+    <div class="pdf-actions" id="pdfActions">
+      <div class="pdf-card">
+        <div class="pdf-card-icon">📋</div>
+        <div class="pdf-card-info">
+          <h3 id="pdfName">document.pdf</h3>
+          <p id="pdfMeta">Ready</p>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="downloadPDF()">⬇️ &nbsp;Download PDF</button>
+      <button class="btn btn-whatsapp" onclick="shareWhatsApp()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        </svg>
+        Share to WhatsApp
+      </button>
+      <button class="btn btn-secondary" onclick="resetApp()">🔄 &nbsp;Scan New Document</button>
+    </div>
+
+    <button class="btn btn-danger" id="clearBtn" onclick="clearAll()" style="display:none">
+      🗑️ &nbsp;Clear All Pages
+    </button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     CROP MODAL
+════════════════════════════════════════ -->
+<div class="crop-modal" id="cropModal">
+  <div class="crop-top">
+    <h2>Adjust Edges</h2>
+    <div class="crop-status">
+      <div class="crop-spin active" id="cropSpin"></div>
+      <span id="cropStatus">Detecting…</span>
+    </div>
+  </div>
+
+  <div class="crop-canvas-wrap">
+    <canvas id="cropCanvas"></canvas>
+    <div class="crop-hint" id="cropHint">Drag the corners to adjust</div>
+  </div>
+
+  <div class="crop-footer">
+    <button class="btn btn-secondary" onclick="skipCrop()">Use Full Image</button>
+    <button class="btn btn-primary" id="cropApplyBtn" onclick="applyCrop()">✂️ Crop & Use</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ── Service Worker ────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+const { jsPDF } = window.jspdf;
+
+// ── State ─────────────────────────────────────────────────────────────
+let pages       = [];     // [{original, enhanced}]
+let pdfBlob     = null;
+let pdfFileName = '';
+
+// Crop state
+let origCanvas  = null;   // full-size canvas of current photo
+let displayScale = 1;     // cropCanvas.width / origCanvas.width
+let cropCorners = [];     // [{x,y}×4] TL,TR,BR,BL in cropCanvas coords
+let dragIdx     = -1;
+let isDragging  = false;
+
+// ── DOM refs ──────────────────────────────────────────────────────────
+const camInput = document.createElement('input');
+camInput.type = 'file';
+camInput.accept = 'image/*';
+camInput.setAttribute('capture', 'environment');
+camInput.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;opacity:0;pointer-events:none;';
+document.body.appendChild(camInput);
+const thumbnailsEl = document.getElementById('thumbnails');
+const emptyState   = document.getElementById('emptyState');
+const pageBadge    = document.getElementById('pageBadge');
+const scanBtn      = document.getElementById('scanBtn');
+const addBtn       = document.getElementById('addBtn');
+const createBtn    = document.getElementById('createBtn');
+const clearBtn     = document.getElementById('clearBtn');
+const pdfActions   = document.getElementById('pdfActions');
+const cropModal    = document.getElementById('cropModal');
+const cropCanvas   = document.getElementById('cropCanvas');
+const cropApplyBtn = document.getElementById('cropApplyBtn');
+const cropStatus   = document.getElementById('cropStatus');
+const cropSpin     = document.getElementById('cropSpin');
+const cropHint     = document.getElementById('cropHint');
+
+// ── Camera ────────────────────────────────────────────────────────────
+function triggerCamera() {
+  camInput.value = '';
+  camInput.click();
+}
+
+camInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  await loadImageForCrop(file);
+});
+
+// ── Load image → show crop modal ──────────────────────────────────────
+async function loadImageForCrop(file) {
+  const dataUrl = await readFile(file);
+  const img = await loadImage(dataUrl);
+
+  // Store original at full resolution
+  origCanvas = document.createElement('canvas');
+  origCanvas.width  = img.naturalWidth;
+  origCanvas.height = img.naturalHeight;
+  origCanvas.getContext('2d').drawImage(img, 0, 0);
+
+  // Size the crop canvas to fit the modal (screen minus ~150px for header+footer)
+  const maxW = window.innerWidth;
+  const maxH = window.innerHeight - 160;
+  const ratio = img.naturalWidth / img.naturalHeight;
+  let cw = maxW, ch = cw / ratio;
+  if (ch > maxH) { ch = maxH; cw = ch * ratio; }
+  cropCanvas.width  = Math.round(cw);
+  cropCanvas.height = Math.round(ch);
+  displayScale = cropCanvas.width / origCanvas.width;
+
+  // Default corners: small inset so the handles are visible
+  const pad = 0.04;
+  cropCorners = [
+    { x: cw * pad,       y: ch * pad },       // TL
+    { x: cw * (1-pad),   y: ch * pad },       // TR
+    { x: cw * (1-pad),   y: ch * (1-pad) },   // BR
+    { x: cw * pad,       y: ch * (1-pad) }    // BL
+  ];
+
+  renderCrop();
+  cropModal.style.display = 'flex';
+  cropSpin.classList.add('active');
+  cropStatus.textContent = 'Detecting edges…';
+  cropHint.style.display = 'block';
+  cropApplyBtn.disabled = false;
+  cropApplyBtn.textContent = '✂️ Crop & Use';
+
+  // Run auto-detection asynchronously
+  setTimeout(async () => {
+    try {
+      const detected = detectDocumentCorners(origCanvas);
+      cropCorners = detected.map(p => ({
+        x: p.x * displayScale,
+        y: p.y * displayScale
+      }));
+      renderCrop();
+      cropSpin.classList.remove('active');
+      cropStatus.textContent = 'Edges detected ✓';
+    } catch (_) {
+      cropSpin.classList.remove('active');
+      cropStatus.textContent = 'Adjust manually';
+    }
+  }, 60);
+}
+
+// ── Auto edge detection ───────────────────────────────────────────────
+function detectDocumentCorners(canvas) {
+  const MAX = 480;
+  const scale = Math.min(1, MAX / Math.max(canvas.width, canvas.height));
+  const sw = Math.round(canvas.width  * scale);
+  const sh = Math.round(canvas.height * scale);
+
+  const tmp = document.createElement('canvas');
+  tmp.width = sw; tmp.height = sh;
+  tmp.getContext('2d').drawImage(canvas, 0, 0, sw, sh);
+
+  const { data } = tmp.getContext('2d').getImageData(0, 0, sw, sh);
+
+  // Grayscale
+  const g = new Float32Array(sw * sh);
+  for (let i = 0; i < sw * sh; i++) {
+    g[i] = (data[i*4]*77 + data[i*4+1]*150 + data[i*4+2]*29) / 256;
+  }
+
+  // Background brightness: sample image border ring
+  let bgSum = 0, bgN = 0;
+  const RING = 6;
+  for (let x = 0; x < sw; x++) {
+    bgSum += g[x] + g[(sh-1)*sw + x]; bgN += 2;
+  }
+  for (let y = RING; y < sh-RING; y++) {
+    bgSum += g[y*sw] + g[y*sw + sw-1]; bgN += 2;
+  }
+  const bgVal  = bgSum / bgN;
+  const isDark = bgVal < 128;
+  const thresh = isDark ? bgVal + 30 : bgVal - 30;
+
+  const SCANS = 30;
+  const leftXs = [], rightXs = [], topYs = [], botYs = [];
+
+  // Horizontal scan lines
+  for (let li = 0; li < SCANS; li++) {
+    const y = Math.round(sh * (li + .5) / SCANS);
+    for (let x = 0;    x < sw;   x++) { if (isDark ? g[y*sw+x] > thresh : g[y*sw+x] < thresh) { leftXs.push(x);  break; } }
+    for (let x = sw-1; x >= 0;   x--) { if (isDark ? g[y*sw+x] > thresh : g[y*sw+x] < thresh) { rightXs.push(x); break; } }
+  }
+  // Vertical scan lines
+  for (let li = 0; li < SCANS; li++) {
+    const x = Math.round(sw * (li + .5) / SCANS);
+    for (let y = 0;    y < sh;   y++) { if (isDark ? g[y*sw+x] > thresh : g[y*sw+x] < thresh) { topYs.push(y);  break; } }
+    for (let y = sh-1; y >= 0;   y--) { if (isDark ? g[y*sw+x] > thresh : g[y*sw+x] < thresh) { botYs.push(y);  break; } }
+  }
+
+  const pct = (arr, p) => {
+    if (!arr.length) return null;
+    return [...arr].sort((a,b) => a-b)[Math.round((arr.length-1)*p)];
+  };
+
+  const l = pct(leftXs,  .2), r = pct(rightXs, .8);
+  const t = pct(topYs,   .2), b = pct(botYs,   .8);
+  if (l === null || r === null || t === null || b === null) throw new Error('no doc');
+
+  // Sanity: region must be at least 20% of image
+  if ((r-l) < sw*.2 || (b-t) < sh*.2) throw new Error('too small');
+
+  const mg = 4; // small outward margin
+  const inv = 1 / scale;
+  return [
+    { x: Math.max(0, l-mg) * inv, y: Math.max(0, t-mg) * inv },
+    { x: Math.min(sw-1, r+mg) * inv, y: Math.max(0, t-mg) * inv },
+    { x: Math.min(sw-1, r+mg) * inv, y: Math.min(sh-1, b+mg) * inv },
+    { x: Math.max(0, l-mg) * inv, y: Math.min(sh-1, b+mg) * inv }
+  ];
+}
+
+// ── Crop canvas rendering ─────────────────────────────────────────────
+function renderCrop() {
+  const ctx = cropCanvas.getContext('2d');
+  const cw = cropCanvas.width, ch = cropCanvas.height;
+  const [tl, tr, br, bl] = cropCorners;
+
+  // 1. Draw image
+  ctx.drawImage(origCanvas, 0, 0, cw, ch);
+
+  // 2. Dark mask outside document (even-odd fill rule creates a "hole")
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.beginPath();
+  ctx.rect(0, 0, cw, ch);
+  ctx.moveTo(tl.x, tl.y);
+  ctx.lineTo(bl.x, bl.y);
+  ctx.lineTo(br.x, br.y);
+  ctx.lineTo(tr.x, tr.y);
+  ctx.closePath();
+  ctx.fill('evenodd');
+  ctx.restore();
+
+  // 3. Document border
+  ctx.save();
+  ctx.strokeStyle = '#6366f1';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(tl.x, tl.y);
+  ctx.lineTo(tr.x, tr.y);
+  ctx.lineTo(br.x, br.y);
+  ctx.lineTo(bl.x, bl.y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+
+  // 4. Corner handles
+  const R = Math.max(16, Math.round(Math.min(cw, ch) * 0.04));
+  cropCorners.forEach((p, i) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, 0, Math.PI*2);
+    ctx.fillStyle = i === dragIdx ? '#6366f1' : 'white';
+    ctx.fill();
+    ctx.strokeStyle = '#6366f1';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+    ctx.fillStyle = i === dragIdx ? 'white' : '#6366f1';
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+// ── Crop drag events ──────────────────────────────────────────────────
+function getCanvasXY(e) {
+  const rect = cropCanvas.getBoundingClientRect();
+  const src  = e.touches ? e.touches[0] : e;
+  return {
+    x: (src.clientX - rect.left) * (cropCanvas.width  / rect.width),
+    y: (src.clientY - rect.top)  * (cropCanvas.height / rect.height)
+  };
+}
+
+cropCanvas.addEventListener('touchstart',  onDown, { passive: false });
+cropCanvas.addEventListener('touchmove',   onMove, { passive: false });
+cropCanvas.addEventListener('touchend',    onUp);
+cropCanvas.addEventListener('mousedown',   onDown);
+cropCanvas.addEventListener('mousemove',   onMove);
+cropCanvas.addEventListener('mouseup',     onUp);
+
+function onDown(e) {
+  e.preventDefault();
+  const pos  = getCanvasXY(e);
+  const snap = Math.max(40, Math.round(Math.min(cropCanvas.width, cropCanvas.height) * 0.08));
+  let best = -1, bestD = Infinity;
+  cropCorners.forEach((c, i) => {
+    const d = Math.hypot(c.x - pos.x, c.y - pos.y);
+    if (d < snap && d < bestD) { best = i; bestD = d; }
+  });
+  dragIdx    = best;
+  isDragging = best !== -1;
+  if (isDragging) {
+    cropHint.style.display = 'none';
+    renderCrop();
+  }
+}
+
+function onMove(e) {
+  if (!isDragging) return;
+  e.preventDefault();
+  const pos = getCanvasXY(e);
+  cropCorners[dragIdx] = {
+    x: Math.max(0, Math.min(cropCanvas.width,  pos.x)),
+    y: Math.max(0, Math.min(cropCanvas.height, pos.y))
+  };
+  renderCrop();
+}
+
+function onUp() {
+  isDragging = false;
+  dragIdx    = -1;
+  renderCrop();
+}
+
+// ── Apply crop (perspective correction) ──────────────────────────────
+async function applyCrop() {
+  cropApplyBtn.disabled    = true;
+  cropApplyBtn.textContent = '⏳ Processing…';
+  cropStatus.textContent   = 'Applying correction…';
+  cropSpin.classList.add('active');
+
+  await sleep(40); // let UI repaint
+
+  // Convert display corners → original image coords
+  const oc = cropCorners.map(p => ({
+    x: p.x / displayScale,
+    y: p.y / displayScale
+  }));
+
+  // Compute output dimensions from corner distances
+  const dist2 = (a,b) => Math.hypot(b.x-a.x, b.y-a.y);
+  const topW   = dist2(oc[0], oc[1]);
+  const botW   = dist2(oc[3], oc[2]);
+  const leftH  = dist2(oc[0], oc[3]);
+  const rightH = dist2(oc[1], oc[2]);
+  let outW = Math.max(Math.round(Math.max(topW, botW)), 50);
+  let outH = Math.max(Math.round(Math.max(leftH, rightH)), 50);
+
+  // Cap at 2000px
+  const cap = 2000 / Math.max(outW, outH);
+  if (cap < 1) { outW = Math.round(outW*cap); outH = Math.round(outH*cap); }
+
+  // Warp
+  const warped = warpPerspective(origCanvas, oc, outW, outH);
+
+  // Enhance
+  const original = warped.toDataURL('image/jpeg', .92);
+  const enhanced = enhanceCanvas(warped);
+
+  pages.push({ original, enhanced });
+  closeCropModal();
+  renderThumbnails();
+  updateUI();
+}
+
+// ── Skip crop (use full image, still enhance) ─────────────────────────
+async function skipCrop() {
+  closeCropModal();
+  const idx = pages.length;
+  const original = origCanvas.toDataURL('image/jpeg', .92);
+  pages.push({ original, enhanced: null });
+  renderThumbnails();
+
+  const enhanced = await enhanceImage(original);
+  pages[idx].enhanced = enhanced;
+  renderThumbnails();
+  updateUI();
+}
+
+function closeCropModal() {
+  cropModal.style.display = 'none';
+  origCanvas = null;
+}
+
+// ══════════════════════════════════════════════════
+//  PERSPECTIVE WARP (Homography transform)
+// ══════════════════════════════════════════════════
+
+// Solve 8×8 system via Gaussian elimination
+// srcPts[i] = [u,v]  dstPts[i] = [x,y]
+// Returns h[0..8] such that H maps src → dst
+function computeHomography(srcPts, dstPts) {
+  const M = [];
+  for (let i = 0; i < 4; i++) {
+    const [u, v] = srcPts[i], [x, y] = dstPts[i];
+    M.push([u, v, 1, 0, 0, 0, -u*x, -v*x, x]);
+    M.push([0, 0, 0, u, v, 1, -u*y, -v*y, y]);
+  }
+  // Gaussian elimination with partial pivoting
+  for (let col = 0; col < 8; col++) {
+    let maxR = col;
+    for (let r = col+1; r < 8; r++) if (Math.abs(M[r][col]) > Math.abs(M[maxR][col])) maxR = r;
+    [M[col], M[maxR]] = [M[maxR], M[col]];
+    if (Math.abs(M[col][col]) < 1e-12) continue;
+    for (let r = col+1; r < 8; r++) {
+      const f = M[r][col] / M[col][col];
+      for (let j = col; j <= 8; j++) M[r][j] -= f * M[col][j];
+    }
+  }
+  // Back substitution
+  const h = new Array(9).fill(0); h[8] = 1;
+  for (let r = 7; r >= 0; r--) {
+    if (Math.abs(M[r][r]) < 1e-12) continue;
+    h[r] = M[r][8];
+    for (let c = r+1; c < 8; c++) h[r] -= M[r][c] * h[c];
+    h[r] /= M[r][r];
+  }
+  return h;
+}
+
+function applyH(h, u, v) {
+  const w = h[6]*u + h[7]*v + h[8];
+  return [(h[0]*u + h[1]*v + h[2]) / w, (h[3]*u + h[4]*v + h[5]) / w];
+}
+
+function warpPerspective(srcCanvas, corners, outW, outH) {
+  // Scale source down for performance (max 1600px)
+  let sc = srcCanvas;
+  let sd = 1;
+  const SRC_MAX = 1600;
+  if (sc.width > SRC_MAX || sc.height > SRC_MAX) {
+    sd = SRC_MAX / Math.max(sc.width, sc.height);
+    const t = document.createElement('canvas');
+    t.width  = Math.round(sc.width  * sd);
+    t.height = Math.round(sc.height * sd);
+    t.getContext('2d').drawImage(sc, 0, 0, t.width, t.height);
+    sc = t;
+  }
+  const scaledCorners = corners.map(p => [p.x * sd, p.y * sd]);
+
+  // H maps dst rectangle → scaled src (inverse mapping)
+  const dstPts = [[0,0],[outW,0],[outW,outH],[0,outH]];
+  const H = computeHomography(dstPts, scaledCorners);
+
+  const dst    = document.createElement('canvas');
+  dst.width    = outW; dst.height = outH;
+  const dstCtx = dst.getContext('2d');
+
+  const srcImg = sc.getContext('2d').getImageData(0, 0, sc.width, sc.height);
+  const sD = srcImg.data, sw = sc.width, sh = sc.height;
+  const dstImg = dstCtx.createImageData(outW, outH);
+  const dD = dstImg.data;
+
+  for (let dy = 0; dy < outH; dy++) {
+    for (let dx = 0; dx < outW; dx++) {
+      const [sx, sy] = applyH(H, dx, dy);
+      const di = (dy * outW + dx) << 2;
+
+      if (sx < 0 || sy < 0 || sx >= sw-1 || sy >= sh-1) {
+        dD[di] = dD[di+1] = dD[di+2] = 255; dD[di+3] = 255;
+        continue;
+      }
+
+      const x0 = sx | 0, y0 = sy | 0;
+      const fx = sx - x0, fy = sy - y0;
+      const i00 = (y0*sw + x0) << 2, i10 = i00 + 4;
+      const i01 = i00 + (sw << 2),   i11 = i01 + 4;
+      const w00 = (1-fx)*(1-fy), w10 = fx*(1-fy);
+      const w01 = (1-fx)*fy,     w11 = fx*fy;
+
+      dD[di]   = w00*sD[i00]   + w10*sD[i10]   + w01*sD[i01]   + w11*sD[i11]   | 0;
+      dD[di+1] = w00*sD[i00+1] + w10*sD[i10+1] + w01*sD[i01+1] + w11*sD[i11+1] | 0;
+      dD[di+2] = w00*sD[i00+2] + w10*sD[i10+2] + w01*sD[i01+2] + w11*sD[i11+2] | 0;
+      dD[di+3] = 255;
+    }
+  }
+
+  dstCtx.putImageData(dstImg, 0, 0);
+  return dst;
+}
+
+// ── Image enhancement ─────────────────────────────────────────────────
+// In-place on a canvas, returns DataURL
+function enhanceCanvas(canvas) {
+  const ctx = canvas.getContext('2d');
+  const id  = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d   = id.data;
+  const f = (259 * (1.35 * 100 + 255)) / (255 * (259 - 1.35 * 100));
+  const b = 8;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i]   = clamp(f*(d[i]   - 128) + 128 + b);
+    d[i+1] = clamp(f*(d[i+1] - 128) + 128 + b);
+    d[i+2] = clamp(f*(d[i+2] - 128) + 128 + b);
+  }
+  ctx.putImageData(id, 0, 0);
+  return canvas.toDataURL('image/jpeg', .93);
+}
+
+// From DataURL (used in non-crop flow)
+async function enhanceImage(dataUrl) {
+  const img = await loadImage(dataUrl);
+  const c   = document.createElement('canvas');
+  c.width   = img.naturalWidth;
+  c.height  = img.naturalHeight;
+  c.getContext('2d').drawImage(img, 0, 0);
+  return enhanceCanvas(c);
+}
+
+// ── Thumbnails ────────────────────────────────────────────────────────
+function renderThumbnails() {
+  thumbnailsEl.innerHTML = '';
+  pages.forEach((p, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb';
+    const img = document.createElement('img');
+    img.src = p.enhanced || p.original;
+    img.alt = `Page ${i+1}`;
+    const lbl = document.createElement('div');
+    lbl.className = 'thumb-label';
+    lbl.textContent = `Page ${i+1}`;
+    const del = document.createElement('button');
+    del.className = 'thumb-del';
+    del.innerHTML = '×';
+    del.setAttribute('aria-label', `Delete page ${i+1}`);
+    del.onclick = () => { pages.splice(i,1); pdfBlob = null; renderThumbnails(); updateUI(); };
+    wrap.append(img, lbl, del);
+    if (!p.enhanced) {
+      const ov = document.createElement('div');
+      ov.className = 'proc-overlay';
+      ov.innerHTML = '<div class="spin"></div><span>Enhancing…</span>';
+      wrap.appendChild(ov);
+    }
+    thumbnailsEl.appendChild(wrap);
+  });
+}
+
+// ── UI state ──────────────────────────────────────────────────────────
+function updateUI() {
+  const n = pages.length, hasPdf = pdfBlob !== null;
+  emptyState.style.display    = n === 0   ? 'flex'  : 'none';
+  thumbnailsEl.style.display  = n > 0     ? 'grid'  : 'none';
+  pageBadge.style.display     = n > 0     ? 'flex'  : 'none';
+  pageBadge.textContent       = `${n} page${n!==1?'s':''}`;
+  scanBtn.style.display       = n === 0            ? 'flex' : 'none';
+  addBtn.style.display        = n > 0 && !hasPdf   ? 'flex' : 'none';
+  createBtn.style.display     = n > 0 && !hasPdf   ? 'flex' : 'none';
+  clearBtn.style.display      = n > 0 && !hasPdf   ? 'flex' : 'none';
+  pdfActions.style.display    = hasPdf             ? 'flex' : 'none';
+}
+
+// ── PDF creation ──────────────────────────────────────────────────────
+async function createPDF() {
+  if (!pages.length) return;
+  createBtn.disabled    = true;
+  createBtn.textContent = '⏳ Creating PDF…';
+  await sleep(30);
+
+  try {
+    const pdf  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pw   = pdf.internal.pageSize.getWidth();
+    const ph   = pdf.internal.pageSize.getHeight();
+    const mg   = 6;
+
+    for (let i = 0; i < pages.length; i++) {
+      if (i > 0) pdf.addPage();
+      const src = pages[i].enhanced || pages[i].original;
+      await new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          const ratio = img.width / img.height;
+          let w = pw - mg*2, h = w / ratio;
+          if (h > ph - mg*2) { h = ph - mg*2; w = h * ratio; }
+          pdf.addImage(src, 'JPEG', (pw-w)/2, (ph-h)/2, w, h, undefined, 'FAST');
+          resolve();
+        };
+        img.src = src;
+      });
+    }
+
+    pdfBlob     = pdf.output('blob');
+    pdfFileName = `DocScan_${fmtDate()}.pdf`;
+    document.getElementById('pdfName').textContent = pdfFileName;
+    document.getElementById('pdfMeta').textContent =
+      `${pages.length} page${pages.length!==1?'s':''} · ${(pdfBlob.size/1024).toFixed(0)} KB`;
+    updateUI();
+    showToast('✅ PDF ready!');
+  } catch (err) {
+    console.error(err);
+    showToast('❌ Could not create PDF');
+    createBtn.disabled    = false;
+    createBtn.textContent = '📑 Create PDF';
+  }
+}
+
+// ── Download ──────────────────────────────────────────────────────────
+function downloadPDF() {
+  if (!pdfBlob) return;
+  const url = URL.createObjectURL(pdfBlob);
+  const a   = Object.assign(document.createElement('a'), { href: url, download: pdfFileName });
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  showToast('⬇️ Downloading…');
+}
+
+// ── WhatsApp share ────────────────────────────────────────────────────
+async function shareWhatsApp() {
+  if (!pdfBlob) return;
+  if (navigator.share) {
+    try {
+      const file = new File([pdfBlob], pdfFileName, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Scanned Document' });
+        return;
+      }
+      await navigator.share({ title: 'Scanned Document', text: 'Scanned document PDF' });
+      return;
+    } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  downloadPDF();
+  showToast('📥 Saved! Open WhatsApp to share.');
+  setTimeout(() => window.open('https://wa.me/', '_blank'), 1800);
+}
+
+// ── Reset ─────────────────────────────────────────────────────────────
+function clearAll() {
+  pages = []; pdfBlob = null;
+  renderThumbnails(); updateUI();
+}
+
+function resetApp() {
+  pages = []; pdfBlob = null; pdfFileName = '';
+  renderThumbnails(); updateUI();
+  createBtn.disabled = false;
+  createBtn.textContent = '📑 Create PDF';
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────
+let toastT;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function clamp(v) { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function readFile(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = src;
+  });
+}
+
+function fmtDate() {
+  const d = new Date();
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+function pad(n) { return String(n).padStart(2,'0'); }
+</script>
+</body>
+</html>
